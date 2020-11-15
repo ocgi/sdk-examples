@@ -1,4 +1,4 @@
-// Copyright 2020 THL A29 Limited, a Tencent company.
+// Copyright 2021 The OCGI Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package main is a very simple echo TCP server
 package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"log"
 	"net"
@@ -26,11 +26,14 @@ import (
 	"syscall"
 	"time"
 
-	sdk "git.code.oa.com/ocgi/carrier-sdk/sdks/sdkgo"
+	sdk "github.com/ocgi/carrier-sdk/sdks/sdkgo"
+	sdkapi "github.com/ocgi/carrier-sdk/sdks/sdkgo/api/v1alpha1"
 )
 
-// main starts a TCP server that receives a message at a time
-// (newline delineated), and echos the output.
+var (
+	Version = "default"
+)
+
 func main() {
 	go doSignal()
 
@@ -53,13 +56,44 @@ func main() {
 		log.Fatalf("Could not connect to sdk: %v", err)
 	}
 
-	log.Print("Starting Health Ping")
-	stop := make(chan struct{})
-	go doHealth(s, stop)
-
 	log.Print("Marking this server as ready")
-	if err := s.SetReady(true); err != nil {
-		log.Fatalf("Could not send ready message")
+	if err := s.SetCondition("carrier.ocgi.dev/ready", "True"); err != nil {
+		log.Fatalf("Could not set ready condition: %v", err)
+	}
+
+	log.Print("Starting watch gameserver")
+	f := func(gs *sdkapi.GameServer) {
+		// We just dump the GameServer fields.
+		status, err := json.Marshal(gs)
+		if err != nil {
+			log.Printf("Decode gameserver error: %v", err)
+			return
+		}
+		log.Printf("Dump GameServer: %s", string(status))
+		if gs.Spec.Constraints == nil {
+			return
+		}
+		for _, constraint := range gs.Spec.Constraints {
+			if constraint == nil {
+				continue
+			}
+			if constraint.Type == "NotInService" &&
+				constraint.Effective {
+				log.Printf("Fake wating for closing connnetion for %v", gs.ObjectMeta.Name)
+				time.Sleep(30 * time.Second)
+				if err = s.SetCondition("carrier.ocgi.dev/retired", "True"); err != nil {
+					log.Printf("Failed to set retired: %v", err)
+				}
+				if err = s.SetCondition("carrier.ocgi.dev/has-no-player", "True"); err != nil {
+					log.Printf("Failed to set hasplayer: %v", err)
+				}
+				os.Exit(0)
+			}
+		}
+	}
+	err = s.WatchGameServer(f)
+	if err != nil {
+		log.Fatalf("Failed to watch gameserver: %v", err)
 	}
 
 	for {
@@ -67,7 +101,7 @@ func main() {
 		if err != nil {
 			log.Printf("Unable to accept incoming tcp connection: %v", err)
 		}
-		go handleConnection(conn, stop, s)
+		go handleConnection(conn, s)
 	}
 }
 
@@ -86,7 +120,7 @@ func doSignal() {
 }
 
 // handleConnection services a single tcp connection to the server
-func handleConnection(conn net.Conn, stop chan struct{}, s *sdk.SDK) {
+func handleConnection(conn net.Conn, s *sdk.SDK) {
 	log.Printf("Client %s connected", conn.RemoteAddr().String())
 	scanner := bufio.NewScanner(conn)
 	for {
@@ -94,11 +128,11 @@ func handleConnection(conn net.Conn, stop chan struct{}, s *sdk.SDK) {
 			log.Printf("Client %s disconnected", conn.RemoteAddr().String())
 			return
 		}
-		handleCommand(conn, scanner.Text(), stop, s)
+		handleCommand(conn, scanner.Text(), s)
 	}
 }
 
-// respond responds to a given sender.
+// send response to client
 func respond(conn net.Conn, txt string) {
 	log.Printf("Responding with %q", txt)
 	if _, err := conn.Write([]byte(txt + "\n")); err != nil {
@@ -106,7 +140,8 @@ func respond(conn net.Conn, txt string) {
 	}
 }
 
-func handleCommand(conn net.Conn, txt string, stop chan struct{}, s *sdk.SDK) {
+// handle client command request
+func handleCommand(conn net.Conn, txt string, s *sdk.SDK) {
 	parts := strings.Split(strings.TrimSpace(txt), " ")
 
 	log.Printf("parts: %v", parts)
@@ -118,57 +153,46 @@ func handleCommand(conn net.Conn, txt string, stop chan struct{}, s *sdk.SDK) {
 			return
 		}
 		doSetRequest(conn, cmd, parts[1], s)
-	case "UNHEALTHY": // turns off the health pings
-		close(stop)
 	case "EXIT":
+		log.Printf("Receive EXIT command, exiting...")
 		os.Exit(0)
+	case "VERSION":
+		respond(conn, "Version: "+Version)
 	default:
-		log.Fatalf("Invalid command: %s", cmd)
+		log.Printf("Invalid command: %s", cmd)
+		respond(conn, "Invalid command: "+cmd)
 	}
 }
 
 func doSetRequest(conn net.Conn, cmd, val string, sdk *sdk.SDK) {
 	var err error
 
-	v := func(v string) bool {
+	v := func(v string) string {
 		if v == "TRUE" {
-			return true
+			return "True"
 		} else {
-			return false
+			return "False"
 		}
 	}(val)
 
 	switch cmd {
 	case "FILLED":
-		if err = sdk.SetFilled(v); err != nil {
-			log.Fatalf("Failed to set filled: %v", err)
+		if err = sdk.SetCondition("carrier.ocgi.dev/filled", v); err != nil {
+			log.Printf("Failed to set filled: %v", err)
 		}
 	case "RETIRED":
-		if err = sdk.SetRetired(v); err != nil {
-			log.Fatalf("Failed to set retired: %v", err)
+		if err = sdk.SetCondition("carrier.ocgi.dev/retired", v); err != nil {
+			log.Printf("Failed to set retired: %v", err)
 		}
-	case "HASPLAYER":
-		if err = sdk.SetHasPlayer(v); err != nil {
-			log.Fatalf("Failed to set hasplayer: %v", err)
+	case "HASNOPLAYER":
+		if err = sdk.SetCondition("carrier.ocgi.dev/has-no-player", v); err != nil {
+			log.Printf("Failed to set hasplayer: %v", err)
 		}
 	}
-
-	// send ACK to client
-	respond(conn, "ACK: "+cmd)
-}
-
-// doHealth sends the regular Health Pings
-func doHealth(sdk *sdk.SDK, stop <-chan struct{}) {
-	tick := time.Tick(2 * time.Second)
-	for {
-		if err := sdk.Health(); err != nil {
-			log.Fatalf("Could not send health ping: %v", err)
-		}
-		select {
-		case <-stop:
-			log.Print("Stopped health pings")
-			return
-		case <-tick:
-		}
+	if err != nil {
+		respond(conn, "Failed to run command: "+cmd)
+	} else {
+		// send ACK to client
+		respond(conn, "ACK: "+cmd)
 	}
 }

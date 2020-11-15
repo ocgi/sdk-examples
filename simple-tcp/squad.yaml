@@ -12,24 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: "carrier.ocgi.dev/v1alpha1"
-kind: GameServer
+apiVersion: carrier.ocgi.dev/v1alpha1
+kind: Squad
 metadata:
-  name: "simple-tcp-example"
+  name: squad-example
+  namespace: default
 spec:
-  ports:
-  - name: default
-    containerPort: 7654
-    protocol: TCP
+  replicas: 2
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+    type: RollingUpdate
   template:
+    metadata:
+      labels:
+        foo: bar
     spec:
-      containers:
-      - name: server
-        image: ocgi/simple-tcp:0.1
-        resources:
-          requests:
-            memory: "32Mi"
-            cpu: "20m"
-          limits:
-            memory: "32Mi"
-            cpu: "20m"
+      deletableGates:
+      - carrier.ocgi.dev/has-no-player
+      - carrier.ocgi.dev/retired
+      ports:
+      - container: server
+        containerPort: 7654
+        name: default
+        protocol: TCP
+      template:
+        spec:
+          containers:
+          - image: ocgi/simple-tcp:0.1
+            name: server

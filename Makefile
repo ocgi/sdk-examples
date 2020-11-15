@@ -1,4 +1,4 @@
-# Copyright 2020 THL A29 Limited, a Tencent company.
+# Copyright 2021 The OCGI Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-REGISTRY_NAME=hub.oa.com/dbyin
+REGISTRY_NAME=ocgi
 VERSION=0.1
 OUTDIR=${PWD}/bin
 
-all: fmt vet simpletcp simpletcp-image push
+all: fmt vet simple-tcp simple-tcp-image push
 
 clean: ## make clean
 	rm -rf ${OUTDIR}
@@ -29,12 +29,12 @@ vet:
 	@echo "run go vet ..."
 	@go vet ./simple-tcp/...
 
-simpletcp: fmt vet
+simple-tcp: fmt vet
 	@echo "build simple-tcp"
-	cd simple-tcp && go build -o ${OUTDIR}/simple-tcp
+	cd simple-tcp && GOOS=linux go build -ldflags "-X 'main.Version=$(VERSION)'" -o ${OUTDIR}/simple-tcp
 
-simpletcp-image: simple-tcp
-	docker build -t $(REGISTRY_NAME)/carrier-simpletcp:$(VERSION) -f simple-tcp/Dockerfile .
+simple-tcp-image: simple-tcp
+	docker build -t $(REGISTRY_NAME)/simple-tcp:$(VERSION) -f simple-tcp/Dockerfile .
 
-push: simpletcp-image
-	docker push $(REGISTRY_NAME)/carrier-simpletcp:$(VERSION)
+push: simple-tcp-image
+	docker push $(REGISTRY_NAME)/simple-tcp:$(VERSION)
