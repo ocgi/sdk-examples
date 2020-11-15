@@ -21,10 +21,12 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
-	sdk "git.code.oa.com/ocgi/crrier-sdk/sdks/sdkgo"
+	sdk "git.code.oa.com/ocgi/carrier-sdk/sdks/sdkgo"
 )
 
 // main starts a TCP server that receives a message at a time
@@ -125,7 +127,7 @@ func handleCommand(conn net.Conn, txt string, stop chan struct{}, s *sdk.SDK) {
 	}
 }
 
-func doSetRequest(conn net.Conn, cmd, val string, sdk *sdk.SDK, txt string) {
+func doSetRequest(conn net.Conn, cmd, val string, sdk *sdk.SDK) {
 	var err error
 
 	v := func(v string) bool {
@@ -136,23 +138,23 @@ func doSetRequest(conn net.Conn, cmd, val string, sdk *sdk.SDK, txt string) {
 		}
 	}(val)
 
-	switch txt {
+	switch cmd {
 	case "FILLED":
-		if err = s.SetFilled(v); err != nil {
+		if err = sdk.SetFilled(v); err != nil {
 			log.Fatalf("Failed to set filled: %v", err)
 		}
 	case "RETIRED":
-		if err = s.SetRetired(v); err != nil {
+		if err = sdk.SetRetired(v); err != nil {
 			log.Fatalf("Failed to set retired: %v", err)
 		}
 	case "HASPLAYER":
-		if err = s.SetHasPlayer(v); err != nil {
+		if err = sdk.SetHasPlayer(v); err != nil {
 			log.Fatalf("Failed to set hasplayer: %v", err)
 		}
 	}
 
 	// send ACK to client
-	respond(conn, "ACK: "+txt)
+	respond(conn, "ACK: "+cmd)
 }
 
 // doHealth sends the regular Health Pings

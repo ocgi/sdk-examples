@@ -16,25 +16,25 @@ REGISTRY_NAME=hub.oa.com/dbyin
 VERSION=0.1
 OUTDIR=${PWD}/bin
 
-all: fmt vet simple-tcp image push
+all: fmt vet simpletcp simpletcp-image push
 
 clean: ## make clean
 	rm -rf ${OUTDIR}
 
 fmt:
 	@echo "run go fmt ..."
-	@go fmt ./...
+	@go fmt ./simple-tcp/...
 
 vet:
 	@echo "run go vet ..."
-	@go vet ./...
+	@go vet ./simple-tcp/...
 
-simpletcp:
+simpletcp: fmt vet
 	@echo "build simple-tcp"
 	cd simple-tcp && go build -o ${OUTDIR}/simple-tcp
 
 simpletcp-image: simple-tcp
-	docker build -t $(REGISTRY_NAME)/carrier-simpletcp:$(VERSION) -f Dockerfile .
+	docker build -t $(REGISTRY_NAME)/carrier-simpletcp:$(VERSION) -f simple-tcp/Dockerfile .
 
 push: simpletcp-image
 	docker push $(REGISTRY_NAME)/carrier-simpletcp:$(VERSION)
